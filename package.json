@@ -6,7 +6,8 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
     "exiftool-vendored": "^32.1.0",
-    "formidable": "^3.5.2"
+    "formidable": "^3.5.2",
+    "fast-xml-parser": "^5.2.5"
   },
   "engines": {
     "node": ">=20"
