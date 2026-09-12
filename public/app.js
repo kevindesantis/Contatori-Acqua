@@ -20,7 +20,31 @@ function badge(status){
   const x=m[status]||["⚪ NON CONTROLLATO","small"];
   return `<span class="${x[1]}"><b>${x[0]}</b></span>`;
 }
+
+async function runDiagnostics(){
+  const out=$("#diagOut");
+  if(out) out.textContent="Controllo…";
+  try{
+    const r=await fetch("/api/diagnostics",{cache:"no-store"});
+    const x=await r.json();
+    const sp=x.supabase?.ok ? "✅ Supabase OK" : `❌ Supabase: ${x.supabase?.error||"errore"}`;
+    const sg=x.soget?.ok ? `✅ SO.G.E.T. OK${x.soget.operator?` · operatore ${x.soget.operator}`:""}` :
+      `❌ SO.G.E.T.: ${x.soget?.error||"errore"}`;
+    if(out) out.innerHTML=`${sp}<br>${sg}`;
+    $("#liveStatus").textContent=x.soget?.ok?"SO.G.E.T. LIVE ✓":"SO.G.E.T. errore";
+    return x;
+  }catch(e){
+    if(out) out.textContent="❌ Diagnostica non raggiungibile: "+e.message;
+    return null;
+  }
+}
+
 function initMap(){
+  if(typeof L==="undefined"){
+    console.error("Leaflet non caricato");
+    $("#map").innerHTML='<div class="warn" style="padding:16px">Mappa non caricata: libreria Leaflet non raggiungibile.</div>';
+    return;
+  }
   map=L.map("map").setView([38.89,16.75],12);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{y}/{x}.png".replace("/{y}/{x}","/{z}/{x}/{y}"),{maxZoom:20,attribution:"© OpenStreetMap"}).addTo(map);
 }
@@ -179,7 +203,7 @@ $("#sogetSearch").oninput=()=>{
   const out=soget.filter(x=>norm([x.matricola,x.intestatario,x.indirizzo,x.codice].join(" ")).includes(q)).slice(0,80);
   $("#sogetResults").innerHTML=out.map(x=>`<div style="padding:8px 0;border-bottom:1px solid #1b3049"><b>${esc(x.matricola)}</b> · ${esc(x.intestatario)}<div class="small">${esc(x.indirizzo)} · ultima cache ${esc(x.ultimaLettura)}</div></div>`).join("");
 };
-$$(".tab").forEach(b=>b.onclick=()=>{$$(".tab").forEach(x=>x.classList.remove("active"));$$(".panel").forEach(x=>x.classList.remove("active"));b.classList.add("active");$("#"+b.dataset.p).classList.add("active");if(b.dataset.p==="mapPage")setTimeout(()=>{map.invalidateSize();renderMap()},60)});
+$$(".tab").forEach(b=>b.onclick=()=>{$$(".tab").forEach(x=>x.classList.remove("active"));$$(".panel").forEach(x=>x.classList.remove("active"));b.classList.add("active");$("#"+b.dataset.p).classList.add("active");if(b.dataset.p==="mapPage")setTimeout(()=>{if(map){map.invalidateSize();renderMap()}},60)});
 
 async function showAuth(session){
   currentUser=session?.user||null;
@@ -206,9 +230,22 @@ $("#loginBtn").onclick=async()=>{
   if(data?.session)await showAuth(data.session);
 };
 $("#logoutBtn").onclick=async()=>{await sb.auth.signOut();await showAuth(null)};
+$("#diagBtn").onclick=runDiagnostics;
+
 (async()=>{
-  if(!sb){$("#status").textContent="Configura Supabase";return}
-  await loadSoget();initMap();
+  const configured=await loadRuntimeConfig();
+  initMap();
+  await runDiagnostics();
+
+  if(!configured){
+    $("#status").textContent="Supabase non configurato";
+    $("#authBox").style.display="block";
+    $("#appBody").style.display="block";
+    $("#loginMsg").innerHTML="Configura su Vercel <b>SUPABASE_URL</b> e <b>SUPABASE_ANON_KEY</b>, poi fai Redeploy.";
+    return;
+  }
+
+  await loadSoget();
   const {data:{session}}=await sb.auth.getSession();
   await showAuth(session);
   sb.auth.onAuthStateChange((_e,s)=>showAuth(s));
