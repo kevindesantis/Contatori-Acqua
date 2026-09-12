@@ -26,7 +26,11 @@ dialog form{display:grid;gap:9px}.preview{width:100%;max-height:270px;object-fit
 <body>
 <header>
 <div><h1>Contatori Sellia</h1><div class="sub">Online • foto • GPS • SO.G.E.T.</div></div>
+<div style="display:flex;gap:7px;align-items:center">
+<div class="pill" id="liveStatus">SO.G.E.T. live</div>
 <div class="pill" id="status">Avvio…</div>
+<button id="logoutBtn" style="display:none">Esci</button>
+</div>
 </header>
 <nav>
 <button class="tab active" data-p="home">Riepilogo</button>
@@ -36,6 +40,15 @@ dialog form{display:grid;gap:9px}.preview{width:100%;max-height:270px;object-fit
 <button class="tab" data-p="soget">SO.G.E.T.</button>
 </nav>
 <main>
+<section id="authBox" class="card" style="display:none;max-width:430px;margin:30px auto">
+<h3>Accesso</h3>
+<div class="small" style="margin-bottom:10px">Accedi con l'utente creato in Supabase Authentication.</div>
+<input id="loginEmail" type="email" placeholder="Email" style="margin-bottom:8px">
+<input id="loginPassword" type="password" placeholder="Password" style="margin-bottom:8px">
+<button class="primary" id="loginBtn">Accedi</button>
+<div id="loginMsg" class="progress"></div>
+</section>
+<div id="appBody">
 <section id="home" class="panel active">
 <div class="grid">
 <div class="card stat"><span>Foto</span><b id="nPhotos">0</b></div>
@@ -62,7 +75,10 @@ dialog form{display:grid;gap:9px}.preview{width:100%;max-height:270px;object-fit
 <section id="mapPage" class="panel"><div class="card"><div id="map"></div></div></section>
 
 <section id="archive" class="panel">
-<div class="card"><input id="search" placeholder="Cerca matricola, intestatario, indirizzo…"></div>
+<div class="card">
+<div class="row"><input id="search" placeholder="Cerca matricola, intestatario, indirizzo…"><button id="refreshLiveBtn">Aggiorna stati SO.G.E.T.</button></div>
+<div class="small" id="refreshLiveMsg" style="margin-top:7px"></div>
+</div>
 <div class="card" id="list"></div>
 </section>
 
@@ -72,7 +88,7 @@ dialog form{display:grid;gap:9px}.preview{width:100%;max-height:270px;object-fit
 <div id="sogetResults" style="margin-top:10px"></div>
 </div>
 </section>
-</main>
+</div></main>
 
 <dialog id="dlg">
 <form method="dialog">
@@ -81,6 +97,7 @@ dialog form{display:grid;gap:9px}.preview{width:100%;max-height:270px;object-fit
 <label>Lettura m³<input id="reading" inputmode="numeric"></label>
 <label>Intestatario<input id="owner"></label>
 <label>Indirizzo<input id="address"></label>
+<div id="liveBox" class="card" style="margin:0"></div>
 <label>Note<textarea id="notes"></textarea></label>
 <div class="row"><button value="cancel">Annulla</button><button type="button" class="primary" id="saveBtn">Salva</button></div>
 </form>
