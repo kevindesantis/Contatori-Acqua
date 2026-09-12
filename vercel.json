@@ -2,12 +2,18 @@
   "functions": {
     "api/metadata.js": {
       "maxDuration": 30
+    },
+    "api/soget-status.js": {
+      "maxDuration": 30
+    },
+    "api/diagnostics.js": {
+      "maxDuration": 30
     }
   },
   "rewrites": [
     {
       "source": "/",
-      "destination": "/public/index.html"
+      "destination": "/index.html"
     }
   ]
 }
