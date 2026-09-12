@@ -84,6 +84,7 @@ async function login(){
   const pass=process.env.SOGET_PASSWORD;
   if(!user||!pass) throw new Error("Credenziali SO.G.E.T. non configurate su Vercel");
   const r=await call({tipo_operazione:"MB.AUT.A.04",userid:user,passwd:pass,xmlOutPut:"S"});
+  if(/ACCESSO\s+NEGATO/i.test(r.text)) throw new Error("SO.G.E.T.: ACCESSO NEGATO (controlla utente/password)");
   if(!r.cookie) throw new Error("Login SO.G.E.T. non riuscito: nessuna sessione ricevuta");
   return r.cookie;
 }
