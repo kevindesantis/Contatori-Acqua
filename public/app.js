@@ -1,6 +1,30 @@
+let sb=null;
+let runtimeConfig={};
 
-const cfg=window.APP_CONFIG||{};
-const sb=(cfg.SUPABASE_URL&&cfg.SUPABASE_ANON_KEY)?window.supabase.createClient(cfg.SUPABASE_URL,cfg.SUPABASE_ANON_KEY):null;
+async function loadRuntimeConfig(){
+  try{
+    const r=await fetch("/api/config",{cache:"no-store"});
+    if(!r.ok) throw new Error("API config HTTP "+r.status);
+    runtimeConfig=await r.json();
+
+    if(!runtimeConfig.supabaseUrl || !runtimeConfig.supabaseAnonKey){
+      return false;
+    }
+    if(!window.supabase){
+      throw new Error("Libreria Supabase non caricata");
+    }
+
+    sb=window.supabase.createClient(
+      runtimeConfig.supabaseUrl,
+      runtimeConfig.supabaseAnonKey
+    );
+    return true;
+  }catch(e){
+    console.error("Configurazione:",e);
+    return false;
+  }
+}
+
 let records=[],soget=[],map,markers=[],editing=null,currentUser=null,liveTimer=null;
 
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
@@ -48,7 +72,7 @@ function initMap(){
   map=L.map("map").setView([38.89,16.75],12);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{y}/{x}.png".replace("/{y}/{x}","/{z}/{x}/{y}"),{maxZoom:20,attribution:"© OpenStreetMap"}).addTo(map);
 }
-async function loadSoget(){try{soget=await fetch("/data/utenze.json").then(r=>r.json())}catch{soget=[]}}
+async function loadSoget(){try{soget=await fetch("/data/utenze.json",{cache:"no-store"}).then(r=>r.json())}catch{soget=[]}}
 function matchMeter(m){
   const n=eqv(m);if(!n)return null;
   let x=soget.find(a=>eqv(a.matricola)===n);if(x)return x;
@@ -232,21 +256,45 @@ $("#loginBtn").onclick=async()=>{
 $("#logoutBtn").onclick=async()=>{await sb.auth.signOut();await showAuth(null)};
 $("#diagBtn").onclick=runDiagnostics;
 
+window.addEventListener("error", e=>{
+  console.error("JS ERROR:",e.error||e.message);
+  const out=$("#diagOut");
+  if(out) out.innerHTML=`❌ Errore JavaScript: ${esc(e.message||"errore sconosciuto")}`;
+});
+
 (async()=>{
+  $("#status").textContent="Avvio…";
+
+  // Buttons/tabs have already been wired above. Now configure services.
   const configured=await loadRuntimeConfig();
-  initMap();
+
+  try{ initMap(); }catch(e){ console.error("Mappa:",e); }
+
   await runDiagnostics();
 
   if(!configured){
     $("#status").textContent="Supabase non configurato";
     $("#authBox").style.display="block";
     $("#appBody").style.display="block";
-    $("#loginMsg").innerHTML="Configura su Vercel <b>SUPABASE_URL</b> e <b>SUPABASE_ANON_KEY</b>, poi fai Redeploy.";
+    $("#loginMsg").innerHTML=
+      'Mancano <b>SUPABASE_URL</b> o <b>SUPABASE_ANON_KEY</b> nelle Environment Variables di Vercel.';
     return;
   }
 
+  $("#status").textContent="Supabase ✓";
+
   await loadSoget();
-  const {data:{session}}=await sb.auth.getSession();
-  await showAuth(session);
-  sb.auth.onAuthStateChange((_e,s)=>showAuth(s));
+
+  try{
+    const {data:{session},error}=await sb.auth.getSession();
+    if(error) throw error;
+    await showAuth(session);
+    sb.auth.onAuthStateChange((_e,s)=>showAuth(s));
+  }catch(e){
+    console.error("Auth:",e);
+    $("#status").textContent="Errore Supabase";
+    $("#authBox").style.display="block";
+    $("#appBody").style.display="block";
+    $("#loginMsg").textContent=e.message;
+  }
 })();
