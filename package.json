@@ -1,0 +1,14 @@
+{
+  "name": "contatori-sellia-online",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
+    "exiftool-vendored": "^32.1.0",
+    "formidable": "^3.5.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
