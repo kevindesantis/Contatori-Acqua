@@ -25,7 +25,7 @@ async function loadRuntimeConfig(){
   }
 }
 
-let records=[],soget=[],map,markers=[],editing=null,currentUser=null,liveTimer=null;
+let records=[],soget=[],map,markers=[],editing=null,currentUser=null,liveTimer=null,ocrWorker=null;
 
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
 const norm=s=>String(s||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
@@ -97,6 +97,180 @@ async function runDiagnostics(){
     if(out) out.textContent="❌ Diagnostica non raggiungibile: "+e.message;
     return null;
   }
+}
+
+
+function levenshtein(a,b){
+  a=String(a||""); b=String(b||"");
+  const m=a.length,n=b.length,dp=Array(n+1).fill(0).map((_,j)=>j);
+  for(let i=1;i<=m;i++){
+    let prev=dp[0]; dp[0]=i;
+    for(let j=1;j<=n;j++){
+      const tmp=dp[j];
+      dp[j]=Math.min(dp[j]+1,dp[j-1]+1,prev+(a[i-1]===b[j-1]?0:1));
+      prev=tmp;
+    }
+  }
+  return dp[n];
+}
+function meterNorm(s){
+  return String(s||"").toUpperCase().replace(/[^A-Z0-9]/g,"");
+}
+function meterEquiv(s){
+  return meterNorm(s)
+    .replaceAll("B","8").replaceAll("O","0")
+    .replaceAll("I","1").replaceAll("L","1")
+    .replaceAll("S","5").replaceAll("Z","2")
+    .replaceAll("G","6");
+}
+function digitish(s){
+  return String(s||"").toUpperCase()
+    .replace(/[OQDG]/g,"0").replace(/[IL|]/g,"1")
+    .replace(/Z/g,"2").replace(/S/g,"5").replace(/B/g,"8")
+    .replace(/[^0-9]/g,"");
+}
+function allTokens(text){
+  const raw=String(text||"").toUpperCase().replace(/\r/g,"\n");
+  const out=[];
+  for(const line of raw.split(/\n+/)){
+    for(const m of line.matchAll(/[A-Z0-9][A-Z0-9\s./-]{2,20}[A-Z0-9]/g)){
+      const t=m[0].trim().replace(/\s+/g," ");
+      if(t.length>=3) out.push(t);
+    }
+    for(const m of line.matchAll(/[A-Z0-9/-]{4,18}/g)) out.push(m[0]);
+  }
+  return [...new Set(out)];
+}
+function bestMeterCandidate(text){
+  if(!soget?.length)return null;
+  const tokens=allTokens(text)
+    .map(t=>({raw:t,n:meterEquiv(t)}))
+    .filter(x=>x.n.length>=5 && x.n.length<=18);
+
+  let best=null;
+  for(const tok of tokens){
+    for(const u of soget){
+      const db=meterEquiv(u.matricola);
+      if(!db || db.length<5)continue;
+      let score=0,dist=99;
+      if(tok.n===db){score=100;dist=0}
+      else if(tok.n.endsWith(db)||db.endsWith(tok.n)){
+        const diff=Math.abs(tok.n.length-db.length);
+        score=94-Math.min(diff*2,12);dist=diff;
+      }else{
+        dist=levenshtein(tok.n,db);
+        const max=Math.max(tok.n.length,db.length);
+        score=Math.round(100*(1-dist/max));
+      }
+      // favour realistic serial sizes and digit-heavy tokens
+      const digits=(tok.n.match(/\d/g)||[]).length;
+      score += Math.min(4,Math.max(0,digits-5)*0.5);
+      if(!best || score>best.score){
+        best={score,dist,token:tok.raw,meter:u.matricola,user:u};
+      }
+    }
+  }
+  return best && best.score>=68 ? best : null;
+}
+function readingCandidates(text,chosenMeter){
+  const meterDigits=digitish(chosenMeter||"");
+  const toks=allTokens(text);
+  const out=[];
+  for(const raw of toks){
+    const d=digitish(raw);
+    if(d.length<3 || d.length>9)continue;
+    if(meterDigits && (d===meterDigits || meterDigits.includes(d) || d.includes(meterDigits)))continue;
+
+    // Reads are usually 4–6 black integer digits. Red decimal wheels can be appended;
+    // when 7–8 digits appear, prefer first 5/6 as integer part.
+    const variants=[d];
+    if(d.length>=7) variants.push(d.slice(0,5),d.slice(0,6));
+    if(d.length===6) variants.push(d.slice(0,5));
+
+    for(const v of variants){
+      if(v.length<3 || v.length>6)continue;
+      let score=0;
+      if(/^0/.test(v))score+=20;
+      if(v.length===5)score+=28;
+      else if(v.length===6)score+=22;
+      else if(v.length===4)score+=15;
+      else score+=8;
+      if(Number(v)<1000000)score+=8;
+      // reject obvious years/specs
+      if(/^20(1|2)\d$/.test(v))score-=25;
+      out.push({raw,digits:v,value:Number(v),score});
+    }
+  }
+  out.sort((x,y)=>y.score-x.score);
+  return out;
+}
+async function getOcrWorker(){
+  if(ocrWorker)return ocrWorker;
+  if(!window.Tesseract)throw new Error("Motore OCR non caricato");
+  ocrWorker=await Tesseract.createWorker("eng",1,{
+    logger:m=>{
+      if(m.status==="recognizing text"){
+        const p=Math.round((m.progress||0)*100);
+        const el=$("#uploadStatus"); if(el)el.textContent=`OCR ${p}%…`;
+      }
+    }
+  });
+  await ocrWorker.setParameters({
+    tessedit_char_whitelist:"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789/-., ",
+    preserve_interword_spaces:"1",
+    user_defined_dpi:"180"
+  });
+  return ocrWorker;
+}
+async function imageCanvas(file,rotation=0){
+  const bmp=await createImageBitmap(file);
+  const max=1600,scale=Math.min(1,max/Math.max(bmp.width,bmp.height));
+  const sw=Math.max(1,Math.round(bmp.width*scale)),sh=Math.max(1,Math.round(bmp.height*scale));
+  const rot=((rotation%360)+360)%360;
+  const c=document.createElement("canvas");
+  c.width=(rot===90||rot===270)?sh:sw;
+  c.height=(rot===90||rot===270)?sw:sh;
+  const ctx=c.getContext("2d");
+  ctx.translate(c.width/2,c.height/2);
+  ctx.rotate(rot*Math.PI/180);
+  ctx.drawImage(bmp,-sw/2,-sh/2,sw,sh);
+  return c;
+}
+async function recognizeAtRotation(file,rotation){
+  const worker=await getOcrWorker();
+  const canvas=await imageCanvas(file,rotation);
+  const {data}=await worker.recognize(canvas);
+  const text=data?.text||"";
+  const meter=bestMeterCandidate(text);
+  const reads=readingCandidates(text,meter?.meter);
+  return {rotation,text,confidence:data?.confidence||0,meter,reading:reads[0]||null};
+}
+async function recognizeMeterPhoto(file){
+  // First pass. If database match is weak, rotate and retry.
+  const tries=[];
+  for(const rot of [0,90,270,180]){
+    const r=await recognizeAtRotation(file,rot);
+    tries.push(r);
+    if(r.meter?.score>=92 && r.reading?.score>=25)break;
+    if(rot===90 && tries.some(x=>x.meter?.score>=86) && tries.some(x=>x.reading))break;
+  }
+  tries.sort((a,b)=>{
+    const sa=(a.meter?.score||0)+(a.reading?.score||0)+(a.confidence||0)*0.08;
+    const sb=(b.meter?.score||0)+(b.reading?.score||0)+(b.confidence||0)*0.08;
+    return sb-sa;
+  });
+  const best=tries[0]||{};
+  return {
+    meter:best.meter?.meter||null,
+    meterScore:best.meter?.score||0,
+    matchedUser:best.meter?.user||null,
+    reading:best.reading?.value ?? null,
+    readingRaw:best.reading?.digits||null,
+    rotation:best.rotation||0,
+    ocrText:best.text||"",
+    confidence:best.confidence||0,
+    review:!(best.meter?.score>=82 && best.reading)
+  };
 }
 
 function initMap(){
@@ -213,22 +387,59 @@ async function refreshRecordsLive(rows,show=true){
   }
 }
 async function uploadOne(file){
-  const form=new FormData();form.append("file",file,file.name);
-  const md=await fetch("/api/metadata",{method:"POST",body:form}).then(async r=>{const x=await r.json();if(!r.ok)throw new Error(x.error||"Metadata error");return x});
+  $("#uploadStatus").textContent=`Analisi ${file.name}…`;
+
+  // Start metadata request and OCR in parallel.
+  const form=new FormData(); form.append("file",file,file.name);
+  const metaPromise=fetch("/api/metadata",{method:"POST",body:form}).then(async r=>{
+    const x=await r.json(); if(!r.ok)throw new Error(x.error||"Metadata error"); return x;
+  });
+  const ocrPromise=recognizeMeterPhoto(file);
+
+  const [md,ocr]=await Promise.all([metaPromise,ocrPromise]);
+
+  $("#uploadStatus").textContent=`${file.name}: ${ocr.meter||"matricola ?"} · ${ocr.reading??"lettura ?"} m³ · caricamento…`;
+
   const path=`${new Date().toISOString().slice(0,10)}/${crypto.randomUUID()}-${file.name}`;
   const up=await sb.storage.from("meter-photos").upload(path,file,{contentType:file.type||"application/octet-stream"});
   if(up.error)throw up.error;
+
   let captured=new Date(file.lastModified||Date.now()).toISOString();
-  if(md.date){const d=new Date(String(md.date).replace(/^(\d{4}):(\d{2}):(\d{2})/,"$1-$2-$3"));if(!isNaN(d))captured=d.toISOString()}
-  const row={captured_at:captured,latitude:md.lat,longitude:md.lng,gps_accuracy:md.accuracy,original_filename:file.name,photo_path:path,
-    meter_serial:null,reading_m3:null,owner:null,address:null,user_code:null,soget_id:null,needs_review:true,notes:null,soget_live_status:null};
-  const ins=await sb.from("meter_readings").insert(row).select().single();if(ins.error)throw ins.error;return ins.data;
+  if(md.date){
+    const d=new Date(String(md.date).replace(/^(\d{4}):(\d{2}):(\d{2})/,"$1-$2-$3"));
+    if(!isNaN(d))captured=d.toISOString();
+  }
+
+  const u=ocr.matchedUser;
+  const row={
+    captured_at:captured,
+    latitude:md.lat,longitude:md.lng,gps_accuracy:md.accuracy,
+    original_filename:file.name,photo_path:path,
+    meter_serial:ocr.meter||null,
+    reading_m3:ocr.reading,
+    owner:u?.intestatario||null,
+    address:u?[u.indirizzo,u.civico].filter(Boolean).join(" "):null,
+    user_code:u?.codice||null,
+    soget_id:u?.idUtenza||null,
+    needs_review:!!ocr.review,
+    notes:null,
+    soget_live_status:null
+  };
+
+  const ins=await sb.from("meter_readings").insert(row).select().single();
+  if(ins.error)throw ins.error;
+
+  // Immediately ask the live SO.G.E.T. server when a serial was recognised.
+  if(ins.data?.meter_serial){
+    try{ await refreshRecordsLive([ins.data],false); }catch(e){ console.warn("Live SOGET",e); }
+  }
+  return ins.data;
 }
 $("#uploadBtn").onclick=async()=>{
   const files=[...$("#files").files];if(!files.length)return;
   $("#uploadBtn").disabled=true;
   try{for(let i=0;i<files.length;i++){ $("#uploadStatus").textContent=`${i+1}/${files.length} · ${files[i].name}`;await uploadOne(files[i])}
-    $("#uploadStatus").textContent=`Completato: ${files.length} foto.`;await loadRecords();
+    $("#uploadStatus").textContent=`Completato: ${files.length} foto analizzate.`;await loadRecords();
   }catch(e){$("#uploadStatus").textContent="Errore: "+e.message}finally{$("#uploadBtn").disabled=false}
 };
 window.openEdit=async id=>{
