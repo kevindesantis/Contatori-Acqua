@@ -53,9 +53,9 @@ dialog form{display:grid;gap:9px}.preview{width:100%;max-height:270px;object-fit
 <div class="card" id="diagCard">
   <div class="row">
     <div><b>Connessioni</b><div class="small">Controllo indipendente di Supabase e SO.G.E.T.</div></div>
-    <button id="diagBtn">Test connessioni</button>
+    <div style="display:flex;gap:8px;flex-wrap:wrap"><button id="diagBtn">Test connessioni</button><button id="deepDiagBtn">Diagnostica rete SO.G.E.T.</button></div>
   </div>
-  <div id="diagOut" class="progress">Avvio diagnostica…</div>
+  <div id="diagOut" class="progress">Avvio diagnostica…</div><pre id="deepDiagOut" style="white-space:pre-wrap;font-size:12px;margin-top:10px;max-height:420px;overflow:auto"></pre>
 </div>
 <div class="grid">
 <div class="card stat"><span>Foto</span><b id="nPhotos">0</b></div>

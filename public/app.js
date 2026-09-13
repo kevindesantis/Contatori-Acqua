@@ -45,6 +45,42 @@ function badge(status){
   return `<span class="${x[1]}"><b>${x[0]}</b></span>`;
 }
 
+
+function fmtDiag(x){
+  const line=(name,v)=>{
+    if(!v) return `${name}: —`;
+    if(v.ok) return `${name}: ✅ OK` +
+      (v.status?` · HTTP ${v.status}`:"") +
+      (v.protocol?` · ${v.protocol}`:"") +
+      (v.denied?" · ACCESSO NEGATO":"") +
+      (v.cookieCount!=null?` · cookie ${v.cookieCount}`:"");
+    const e=v.error||{};
+    return `${name}: ❌ ${e.code||""} ${e.message||"errore"}`.trim();
+  };
+  return [
+    `Regione Vercel: ${x.region||"n/d"}`,
+    line("DNS",x.dns),
+    x.dns?.ok ? `  ${x.dns.addresses.map(a=>a.address).join(", ")}` : "",
+    line("TLS",x.tls),
+    line("HTTPS root",x.httpsRoot),
+    line("Servlet",x.servlet),
+    line("Login",x.login),
+    x.login?.preview ? `\nRisposta login:\n${x.login.preview}` : "",
+    x.servlet?.preview ? `\nRisposta servlet:\n${x.servlet.preview}` : ""
+  ].filter(Boolean).join("\n");
+}
+async function runDeepDiagnostics(){
+  const out=$("#deepDiagOut");
+  out.textContent="Diagnostica rete in corso…";
+  try{
+    const r=await fetch("/api/network-diagnostics",{cache:"no-store"});
+    const x=await r.json();
+    out.textContent=fmtDiag(x);
+  }catch(e){
+    out.textContent="Errore diagnostica: "+e.message;
+  }
+}
+
 async function runDiagnostics(){
   const out=$("#diagOut");
   if(out) out.textContent="Controllo…";
@@ -255,6 +291,7 @@ $("#loginBtn").onclick=async()=>{
 };
 $("#logoutBtn").onclick=async()=>{await sb.auth.signOut();await showAuth(null)};
 $("#diagBtn").onclick=runDiagnostics;
+$("#deepDiagBtn").onclick=runDeepDiagnostics;
 
 window.addEventListener("error", e=>{
   console.error("JS ERROR:",e.error||e.message);
