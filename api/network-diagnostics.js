@@ -72,6 +72,7 @@ async function rawHttps(path="/"){
       path,
       method:"GET",
       timeout:12000,
+      insecureHTTPParser:true,
       headers:{
         "User-Agent":"Mozilla/5.0",
         "Accept":"*/*",
@@ -122,6 +123,7 @@ async function testLogin(){
       path:u.pathname+"?"+u.searchParams.toString(),
       method:"GET",
       timeout:15000,
+      insecureHTTPParser:true,
       headers:{
         "User-Agent":"Mozilla/5.0 (Android 14; LettureAcquedotto)",
         "Accept":"*/*",

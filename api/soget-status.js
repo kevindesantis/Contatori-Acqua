@@ -1,3 +1,4 @@
+import https from "node:https";
 import { XMLParser } from "fast-xml-parser";
 
 const BASE = "https://soget.sintaxinformatica.it/mba01/servlet/ServletDatiServizio";
@@ -18,17 +19,35 @@ function cookieHeader(headers){
 async function call(params,cookie=""){
   const u=new URL(BASE);
   Object.entries(params).forEach(([k,v])=>u.searchParams.set(k,String(v??"")));
-  const r=await fetch(u,{
-    method:"GET",
-    headers:{
-      "User-Agent":"Mozilla/5.0 (Android; LettureAcquedotto live bridge)",
-      ...(cookie?{"Cookie":cookie}:{})
-    },
-    redirect:"manual"
+  return await new Promise((resolve,reject)=>{
+    const req=https.request({
+      hostname:u.hostname,
+      port:443,
+      path:u.pathname+"?"+u.searchParams.toString(),
+      method:"GET",
+      timeout:15000,
+      insecureHTTPParser:true,
+      headers:{
+        "User-Agent":"Mozilla/5.0 (Android 14; LettureAcquedotto)",
+        "Accept":"*/*",
+        "Connection":"close",
+        ...(cookie?{"Cookie":cookie}:{})
+      }
+    },res=>{
+      let text="";
+      res.setEncoding("utf8");
+      res.on("data",c=>text+=c);
+      res.on("end",()=>{
+        const set=res.headers["set-cookie"]||[];
+        const ck=set.map(x=>x.split(";")[0]).join("; ");
+        if((res.statusCode||500)>=400) return reject(new Error(`SOGET HTTP ${res.statusCode}`));
+        resolve({text,cookie:ck});
+      });
+    });
+    req.on("timeout",()=>req.destroy(Object.assign(new Error("SOGET timeout"),{code:"ETIMEDOUT"})));
+    req.on("error",reject);
+    req.end();
   });
-  const text=await r.text();
-  if(!r.ok) throw new Error(`SOGET HTTP ${r.status}`);
-  return {text,cookie:cookieHeader(r.headers)};
 }
 
 function flatten(obj,prefix="",out={}){
