@@ -364,6 +364,32 @@ async function saveLiveResult(record,result,checkedAt){
   await sb.from("meter_readings").update(patch).eq("id",record.id);
   Object.assign(record,patch);
 }
+
+async function sogetLiveLookup(){
+  const meter=$("#sogetLiveMeter").value.trim();
+  const box=$("#sogetLiveResult");
+  if(meter.length<3){box.innerHTML='<span class="warn">Inserisci almeno 3 caratteri.</span>';return}
+  box.textContent="Controllo SO.G.E.T.…";
+  try{
+    const x=await callLive([meter]);
+    const r=x.results?.[0];
+    if(!r){box.innerHTML='<span class="warn">Nessuna risposta.</span>';return}
+    if(r.status==="READ"){
+      box.innerHTML=`${badge("READ")}<div class="small" style="margin-top:6px">${esc(r.serverMeter||meter)} · ${esc(r.owner||"")}<br>${esc(r.address||"")} ${esc(r.civico||"")}<br>Ultima lettura: ${esc(r.lastReading||"-")} · ${esc(r.lastReadingDate||"-")}</div>`;
+    }else if(r.status==="UNREAD"){
+      box.innerHTML=`${badge("UNREAD")}<div class="small" style="margin-top:6px">${esc(r.serverMeter||meter)} · ${esc(r.owner||"")}<br>${esc(r.address||"")} ${esc(r.civico||"")}<br>Ultima lettura: ${esc(r.lastReading||"-")} · ${esc(r.lastReadingDate||"-")}</div>`;
+    }else if(r.status==="ILLEGIBLE"){
+      box.innerHTML=`${badge("ILLEGIBLE")}<div class="small" style="margin-top:6px">${esc(r.serverMeter||meter)} · ${esc(r.owner||"")}<br>${esc(r.address||"")} ${esc(r.civico||"")}</div>`;
+    }else if(r.status==="NOT_FOUND"){
+      box.innerHTML=`${badge("NOT_FOUND")}`;
+    }else{
+      box.innerHTML=`${badge(r.status||"ERROR")}<div class="small">${esc(r.error||"")}</div>`;
+    }
+  }catch(e){
+    box.innerHTML=`<span class="warn">Errore: ${esc(e.message)}</span>`;
+  }
+}
+
 async function refreshRecordsLive(rows,show=true){
   const targets=rows.filter(r=>String(r.meter_serial||"").trim().length>=3);
   if(!targets.length)return;
@@ -397,6 +423,7 @@ async function uploadOne(file){
   const ocrPromise=recognizeMeterPhoto(file);
 
   const [md,ocr]=await Promise.all([metaPromise,ocrPromise]);
+  console.log("GPS metadata",md);
 
   $("#uploadStatus").textContent=`${file.name}: ${ocr.meter||"matricola ?"} · ${ocr.reading??"lettura ?"} m³ · caricamento…`;
 
@@ -467,6 +494,8 @@ $("#saveBtn").onclick=async()=>{
   if(!error){Object.assign(editing,patch);await refreshRecordsLive([editing],false);$("#dlg").close();await loadRecords()}
 };
 $("#refreshLiveBtn").onclick=()=>refreshRecordsLive(records,true);
+$("#sogetLiveBtn").onclick=sogetLiveLookup;
+$("#sogetLiveMeter").addEventListener("keydown",e=>{if(e.key==="Enter")sogetLiveLookup()});
 $("#search").oninput=renderList;
 $("#sogetSearch").oninput=()=>{
   const q=norm($("#sogetSearch").value);
