@@ -8,6 +8,9 @@
     },
     "api/diagnostics.js": {
       "maxDuration": 30
+    },
+    "api/network-diagnostics.js": {
+      "maxDuration": 30
     }
   },
   "rewrites": [
